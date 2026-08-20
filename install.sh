@@ -3,7 +3,7 @@
 # with no hard-coded user, path, or profile assumptions.
 #
 # Usage:
-#   ./install.sh [--profile <id>] [--dsh-api <url>] [--usd-rate <n>] [--peak-hours <json>] [--pricing <json>] [--dry-run]
+#   ./install.sh [--profile <id>] [--dsh-api <url>] [--usd-rate <n>] [--hkd-rate <n>] [--peak-hours <json>] [--pricing <json>] [--upgrade] [--dry-run]
 #   npm install -g dsh-session-cost && install-dsh-session-cost [same flags]
 #
 # Options:
@@ -18,11 +18,18 @@
 #                     plugin falls back to its own 0.91 => omit to keep plugin default)
 #   --peak-hours      JSON [[start,end),…] peak hours (default none -> plugin default)
 #   --pricing         JSON object of model prices (default none -> plugin default)
+#   --upgrade|-f      OVERWRITE an existing install: replace the installed package
+#                     files AND rewrite the cordis.patch.yml row (removes the old
+#                     block, re-appends current flags). Use when a server already
+#                     has a previous version. Idempotent to run; see --force-copy.
+#   --force-copy      With --upgrade: force a file copy of the package even when a
+#                     symlink could be used (e.g. cross-device or self-contained).
 #   --dry-run         print what would change without writing anything
 #
 # Does three things (idempotent — safe to re-run):
 #   1. link/copy this package into <profile>/node_modules/dsh-session-cost
-#   2. append an insert row to <profile>/cordis.patch.yml (only if absent)
+#      (replaces the installed copy when --upgrade is given)
+#   2. append an insert row to <profile>/cordis.patch.yml (fresh row on --upgrade)
 #   3. remind you to restart DSH
 #
 # No root required; the profile must be writable by your user.
@@ -56,6 +63,8 @@ HKD_RATE=""
 PEAK_HOURS=""
 PRICING=""
 DRY_RUN=0
+UPGRADE=0
+FORCE_COPY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --hkd-rate) HKD_RATE="$2"; shift 2 ;;
     --peak-hours) PEAK_HOURS="$2"; shift 2 ;;
     --pricing) PRICING="$2"; shift 2 ;;
+    --upgrade|-f) UPGRADE=1; shift ;;
+    --force-copy) FORCE_COPY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -114,14 +125,27 @@ fi
 
 # --- 1. install the package dir ------------------------------------------------
 LINK="$PROFILE_DIR/node_modules/dsh-session-cost"
-if [[ -e "$LINK" || -L "$LINK" ]]; then
-  echo "→ node_modules/dsh-session-cost already present, skip"
-else
-  # If the source is on the same filesystem, a symlink keeps it updatable in
-  # place; otherwise copy the tree so it is self-contained on any server.
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "→ would link/copy $PLUGIN_DIR -> $LINK"
-  elif ln -s "$PLUGIN_DIR" "$LINK" 2>/dev/null; then
+INSTALLED=0
+[[ -e "$LINK" || -L "$LINK" ]] && INSTALLED=1
+
+if [[ "$INSTALLED" -eq 1 && "$UPGRADE" -eq 1 ]]; then
+  echo "→ node_modules/dsh-session-cost present; upgrading (replacing)…"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    # Detach any symlink first, else `rm -rf` on a symlink would chase the target.
+    rm -f "$LINK"
+    rm -rf "$LINK"
+    INSTALLED=0
+  fi
+elif [[ "$INSTALLED" -eq 1 ]]; then
+  echo "→ node_modules/dsh-session-cost already present, skip (use --upgrade to replace)"
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  [[ "$INSTALLED" -eq 0 ]] && echo "→ would link/copy $PLUGIN_DIR -> $LINK"
+elif [[ "$INSTALLED" -eq 0 ]]; then
+  # Fresh install or upgrade replacement. Prefer a symlink (keeps in-place updates)
+  # unless a copy is requested (--force-copy / cross-device) or a plain symlink fails.
+  if [[ "$FORCE_COPY" -eq 0 ]] && ln -s "$PLUGIN_DIR" "$LINK" 2>/dev/null; then
     echo "→ symlinked $PLUGIN_DIR -> $LINK"
   else
     mkdir -p "$LINK"
@@ -133,9 +157,75 @@ fi
 
 # --- 2. cordis.patch.yml row --------------------------------------------------
 PATCH="$PROFILE_DIR/cordis.patch.yml"
-if grep -q "name: 'dsh-session-cost'" "$PATCH"; then
-  echo "→ cordis.patch.yml already has the session-cost row, skip"
-else
+
+# Remove an existing dsh-session-cost insert block from $PATCH (like the
+# package update, only when --upgrade). The row is a contiguous top-level block
+# that starts at `- insert:` and whose item declares name 'dsh-session-cost';
+# we drop it through the last indented line before the next top-level key.
+strip_session_cost_row() {
+  local prog="/tmp/dsc-strip-$$.awk"
+  cat > "$prog" <<'AWK'
+function flush_pending() {
+  if (inblock == 1) { printf "%s", buf }
+  inblock = 0; buf = ""
+}
+/^[[:space:]]*- insert:/ {
+  buf = $0 "\n"
+  inblock = 1
+  next
+}
+inblock && /^[[:space:]]*name: 'dsh-session-cost'/ {
+  inblock = 2
+  next
+}
+inblock == 1 {
+  if ( $0 ~ /^[[:space:]]/ ) { buf = buf $0 "\n"; next }
+  flush_pending()
+  print $0
+  next
+}
+inblock == 2 {
+  if ( $0 ~ /^[[:space:]]/ ) next
+  inblock = 0; buf = ""
+  print $0
+  next
+}
+{ print }
+END { flush_pending() }
+AWK
+  awk -f "$prog" "$PATCH" > "$PATCH.tmp"
+  mv "$PATCH.tmp" "$PATCH"
+  rm -f "$prog"
+}
+
+ROW_EXISTS=0
+grep -q "name: 'dsh-session-cost'" "$PATCH" && ROW_EXISTS=1
+
+if [[ "$UPGRADE" -eq 1 && "$ROW_EXISTS" -eq 1 ]]; then
+  echo "→ cordis.patch.yml has an old session-cost row; replacing it…"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    strip_session_cost_row
+    ROW_EXISTS=0
+  fi
+elif [[ "$ROW_EXISTS" -eq 1 ]]; then
+  echo "→ cordis.patch.yml already has the session-cost row, skip (use --upgrade to refresh)"
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  if [[ "$ROW_EXISTS" -eq 0 || "$UPGRADE" -eq 1 ]]; then
+    cat <<YAML
+-------------------- (would append) --------------------
+# Per-session DeepSeek API cost (session_cost) — official peak/off-peak pricing
+- insert:
+    - id: session-cost
+      name: 'dsh-session-cost'
+      config:
+        dshApi: $DSH_API
+$( [[ -n "$USD_RATE" ]] && printf '        usdRate: %s\n' "$USD_RATE" )$( [[ -n "$HKD_RATE" ]] && printf '        hkdRate: %s\n' "$HKD_RATE" )$( [[ -n "$PEAK_HOURS" ]] && printf '        peakHours: %s\n' "$PEAK_HOURS" )$( [[ -n "$PRICING" ]] && printf '        pricing: %s\n' "$PRICING" )
+--------------------------------------------------------
+YAML
+  fi
+elif [[ "$ROW_EXISTS" -eq 0 ]]; then
   ROW="# Per-session DeepSeek API cost (session_cost) — official peak/off-peak pricing"
   ROW+=$'\n'"- insert:"
   ROW+=$'\n'"    - id: session-cost"
@@ -156,13 +246,7 @@ else
   fi
   ROW+=$'\n'
   echo "→ appending session-cost row to cordis.patch.yml"
-  if [[ "$DRY_RUN" -eq 0 ]]; then
-    printf '%s\n' "$ROW" >> "$PATCH"
-  else
-    echo "-------------------- (would append) --------------------"
-    printf '%s\n' "$ROW"
-    echo "--------------------------------------------------------"
-  fi
+  printf '%s\n' "$ROW" >> "$PATCH"
 fi
 
 # --- 3. done ------------------------------------------------------------------

@@ -43,12 +43,26 @@ DSH profile 目录：`$DSH_HOME/profiles/<id>/`（默认 `$DSH_HOME=$HOME/.dsh`�
 
 # 先看会改什么，不实际写
 ./install.sh --dry-run
+
+# 目标服务器已装过旧版时：升级并覆盖（替换插件文件 + 重写 config 行）
+./install.sh --profile prod --upgrade --hkd-rate 0.92
 ```
 
 `install.sh` 会（幂等）：① 把本插件 链接/复制 进
 `<profile>/node_modules/dsh-session-cost`；② 若 `cordis.patch.yml` 还没有该行则追加带
 自动探测 `dshApi` 的 insert 行；③ 提示重启 DSH。在另一台机器`不同路径`/`不同 profile`
 上用 `--profile` 指定即可，无需改任何文件内容。
+
+**升级已装的旧版**：在已装过旧版 session-cost 的服务器上，默认幂等会「跳过已有」，不会
+替换旧代码。要真正升级，加 `--upgrade`（别名 `-f`）：
+
+```bash
+./install.sh --profile <id> --upgrade [--hkd-rate 0.92]
+```
+
+`--upgrade` 会 ① 移除并重新链接/复制插件包；② 删除旧 `cordis.patch.yml` 行并追加一行新
+配置（保留其它注释块）。配合 `--force-copy` 可强制文件复制而非符号链接（跨文件系统或需
+自包含时）。升级完**重启 DSH** 后新版生效。
 
 ### 方式 B：npm 安装（发布包自包含）
 
