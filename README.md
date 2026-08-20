@@ -18,27 +18,57 @@
 USD 按可配置汇率折算（默认 7.1 CNY/USD）；DeepSeek 按人民币结算，权威金额以
 [DeepSeek 开放平台](https://platform.deepseek.com) 的用量账单为准。
 
-## 安装
+## 安装（可移植，任意路径/服务器）
 
-1. 链接到 profile 的 node_modules：
+本插件**零机器耦合**：代码里没有任何硬编码用户/路径，外部依赖仅 `curl`（基本所有
+Linux/macOS 都有）。`dshApi`、`usdRate`、`peakHours`、`pricing` 全部走 profile 行的
+config，安装脚本会自动探测目标 DSH 的地址，不写死任何路径。
 
-   ```bash
-   ln -s /home/eric/CodingProject/dsh/plugins/dsh-session-cost \
-         /home/eric/.dsh/profiles/web/node_modules/dsh-session-cost
-   ```
+DSH profile 目录：`$DSH_HOME/profiles/<id>/`（默认 `$DSH_HOME=$HOME/.dsh`）。
 
-2. 在 `/home/eric/.dsh/profiles/web/cordis.patch.yml` 追加：
+### 方式 A：用安装脚本（推荐）
 
-   ```yaml
-   - insert:
-       - id: session-cost
-         name: 'dsh-session-cost'
-         config:
-           dshApi: http://127.0.0.1:3080
-           usdRate: 7.1
-   ```
+把整个目录或发布包放到目标服务器任意路径，然后执行：
 
-3. 重启 DSH。
+```bash
+# 直接运行（自动探测 profile、自动探测 DSH API 端口）
+./install.sh
+
+# 指定 profile / 覆盖 DSH 后端地址
+./install.sh --profile web --dsh-api http://127.0.0.1:3080
+
+# 可选：写入汇率 / 高峰时段 / 价格表
+./install.sh --usd-rate 7.1 --peak-hours '[[9,12],[14,18]]' --pricing '{"deepseek-v5":{...}}'
+
+# 先看会改什么，不实际写
+./install.sh --dry-run
+```
+
+`install.sh` 会（幂等）：① 把本插件 链接/复制 进
+`<profile>/node_modules/dsh-session-cost`；② 若 `cordis.patch.yml` 还没有该行则追加带
+自动探测 `dshApi` 的 insert 行；③ 提示重启 DSH。在另一台机器`不同路径`/`不同 profile`
+上用 `--profile` 指定即可，无需改任何文件内容。
+
+### 方式 B：npm 安装（发布包自包含）
+
+把 `dsh-session-cost-0.1.0.tgz` 拷到目标机，按普通 npm 包装进 profile：
+
+```bash
+cd <profile>/node_modules
+npm install /path/to/dsh-session-cost-0.1.0.tgz   # 若全局装则装到 node 全局
+```
+
+随后执行生成的命令（自动走同款探测逻辑）：
+
+```bash
+install-dsh-session-cost --profile web
+```
+
+仍会往对应 `cordis.patch.yml` 追加 insert 行，然后**重启 DSH**。
+
+### 重启后使用
+
+`session_cost` 工具即插即用，见下方「使用」。
 
 ## 使用
 
@@ -50,7 +80,7 @@ USD 按可配置汇率折算（默认 7.1 CNY/USD）；DeepSeek 按人民币结�
 
 | 键 | 说明 | 默认 |
 |---|---|---|
-| `dshApi` | DSH 后端地址 | `http://127.0.0.1:3080` |
+| `dshApi` | DSH 后端地址（install.sh 自动探测，或 `--dsh-api` 覆盖） | `http://127.0.0.1:3080` |
 | `usdRate` | 人民币兑美元汇率（CNY/USD） | `7.1` |
 | `peakHours` | 北京时间高峰时段 `[[起, 止), …]` | `[[9,12],[14,18]]` |
 | `pricing` | 追加/覆盖模型价格（与内置表同构） | `{}` |

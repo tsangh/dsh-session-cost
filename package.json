@@ -7,6 +7,9 @@
   "exports": {
     ".": "./index.js"
   },
+  "bin": {
+    "install-dsh-session-cost": "./install.sh"
+  },
   "files": [
     "index.js",
     "README.md",
