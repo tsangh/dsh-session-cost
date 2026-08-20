@@ -1,0 +1,3 @@
+# build artifacts — repack with `npm pack` when you need a tarball
+*.tgz
+.npm-cache/

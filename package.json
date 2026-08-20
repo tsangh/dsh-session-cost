@@ -1,0 +1,16 @@
+{
+  "name": "dsh-session-cost",
+  "version": "0.1.0",
+  "description": "Per-session API cost for DSH: reads real token usage from session logs and prices it with DeepSeek's official peak/off-peak schema (CNY + USD).",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "install.sh"
+  ],
+  "license": "MIT"
+}
