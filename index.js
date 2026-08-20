@@ -29,6 +29,10 @@ export const inject = ['tools']
 const DEFAULT_DSH_API = 'http://127.0.0.1:3080'
 const DEFAULT_USD_RATE = 7.1 // CNY per 1 USD
 const DEFAULT_PEAK_HOURS = [[9, 12], [14, 18]] // Beijing time, [startHour, endHour)
+// Foreground stdout capture budget passed to ctx.shell (sh.resolve). Long
+// session.history responses easily exceed dsh-shell's default budget, which
+// truncates output and breaks JSON.parse — raise it far above any real log.
+const DEFAULT_STDOUT_MAX_BYTES = 512 * 1024 * 1024
 const PRICING_SOURCE = 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ (fetched 2026-08-20)'
 
 const DEFAULT_PRICING = {
@@ -186,11 +190,14 @@ function formatOverview(rows, usdRate) {
 
 // ---- API access via ctx.shell + curl (same path as the golden dsh-tools) ----
 
-async function apiCall(sh, dshApi, method, payload) {
+async function apiCall(sh, dshApi, method, payload, stdoutMaxBytes = DEFAULT_STDOUT_MAX_BYTES) {
   const env = JSON.stringify({ type: 'client-request', rpcId: 'sc' + Date.now(), method, payload })
   const cmd = 'curl -s -m 60 -X POST ' + JSON.stringify(dshApi + '/api/' + method) +
     " -H 'Content-Type: application/json' -d " + JSON.stringify(env)
-  const res = await sh.run(sh.resolve({ command: cmd, timeoutMs: 70000 }))
+  // stdoutMaxBytes: dsh-shell truncates foreground stdout past the executor
+  // budget; a long session.history is well over the default and would corrupt
+  // the JSON. Raise the capture budget so the full response is returned.
+  const res = await sh.run(sh.resolve({ command: cmd, timeoutMs: 70000, stdoutMaxBytes }))
   const text = collectedText(res.stdout)
   const data = JSON.parse(text || '{}')
   const r = data.result
@@ -214,6 +221,7 @@ export function apply(ctx, config = {}) {
   const pricing = { ...DEFAULT_PRICING, ...(config.pricing || {}) }
   _pricingKeys = Object.keys(pricing)
   const overviewLimit = Math.max(1, Math.min(50, config.overviewLimit || 8))
+  const stdoutMaxBytes = Math.max(1, Number(config.stdoutMaxBytes) || DEFAULT_STDOUT_MAX_BYTES)
 
   ctx.tools.register({
     name: 'session_cost',
@@ -232,7 +240,7 @@ export function apply(ctx, config = {}) {
       try {
         const sessionId = String(args.sessionId || '').trim()
         if (sessionId) {
-          const value = await apiCall(sh, dshApi, 'session.history', { sessionId, maxMessages: 100000 })
+          const value = await apiCall(sh, dshApi, 'session.history', { sessionId, maxMessages: 100000 }, stdoutMaxBytes)
           const events = (value && value.events) || []
           const fold = foldSession(events, pricing, peakHours)
           const session = { sessionId, projections: { values: {} } }
@@ -249,7 +257,7 @@ export function apply(ctx, config = {}) {
         const rows = []
         for (const s of recent) {
           try {
-            const value = await apiCall(sh, dshApi, 'session.history', { sessionId: s.sessionId, maxMessages: 100000 })
+            const value = await apiCall(sh, dshApi, 'session.history', { sessionId: s.sessionId, maxMessages: 100000 }, stdoutMaxBytes)
             const events = (value && value.events) || []
             const fold = foldSession(events, pricing, peakHours)
             const cny = Object.values(fold.buckets).reduce((sum, b) => sum + b.cny, 0)

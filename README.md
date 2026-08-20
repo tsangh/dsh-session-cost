@@ -85,5 +85,6 @@ install-dsh-session-cost --profile web
 | `peakHours` | 北京时间高峰时段 `[[起, 止), …]` | `[[9,12],[14,18]]` |
 | `pricing` | 追加/覆盖模型价格（与内置表同构） | `{}` |
 | `overviewLimit` | 总览最多会话数 | `8` |
+| `stdoutMaxBytes` | 会话历史 stdout 捕获上限（大会话日志防截断） | `536870912` |
 
 价格变动时改 `pricing` 覆盖即可；内置表在插件版本升级时更新。
