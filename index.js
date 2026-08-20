@@ -19,15 +19,19 @@
 // Config (row config in cordis.patch.yml):
 //   { dshApi?: string            — DSH backend base URL (default http://127.0.0.1:3080)
 //     usdRate?: number           — CNY per 1 USD (default 7.1)
+//     hkdRate?: number           — CNY per 1 HKD (default 0.91)
 //     peakHours?: [[h1, h2], …]  — Beijing peak hour ranges, [start, end) (default [[9,12],[14,18]])
 //     pricing?: object           — extra/override model prices, same shape as DEFAULT_PRICING
-//     overviewLimit?: number     — max sessions in the no-sessionId overview (default 8) }
+//     overviewLimit?: number     — max sessions in the no-sessionId overview (default 8)
+//     stdoutMaxBytes?: number    — shell stdout capture budget for big histories (default 512 MB) }
 
 export const name = 'session-cost'
 export const inject = ['tools']
 
 const DEFAULT_DSH_API = 'http://127.0.0.1:3080'
 const DEFAULT_USD_RATE = 7.1 // CNY per 1 USD
+// CNY per 1 HKD. HKD is USD-pegged (~7.75-7.85); 7.1 / 7.80 ≈ 0.91.
+const DEFAULT_HKD_RATE = 0.91
 const DEFAULT_PEAK_HOURS = [[9, 12], [14, 18]] // Beijing time, [startHour, endHour)
 // Foreground stdout capture budget passed to ctx.shell (sh.resolve). Long
 // session.history responses easily exceed dsh-shell's default budget, which
@@ -131,7 +135,7 @@ function foldSession(events, pricing, peakHours) {
 
 // ---- output formatting ------------------------------------------------------
 
-function formatSession(session, fold, usdRate) {
+function formatSession(session, fold, usdRate, hkdRate) {
   const totalCny = Object.values(fold.buckets).reduce((s, b) => s + b.cny, 0)
   const peakCny = Object.values(fold.buckets).reduce((s, b) => s + b.peakCny, 0)
   const offCny = Object.values(fold.buckets).reduce((s, b) => s + b.offCny, 0)
@@ -156,7 +160,7 @@ function formatSession(session, fold, usdRate) {
   const inputTokens = fold.buckets.uncachedInput.tokens + cacheReadTokens
   const hit = inputTokens ? Math.round((cacheReadTokens / inputTokens) * 100) : null
   out.push('')
-  out.push(`  合计: ${tokens.toLocaleString('en-US')} tokens · ¥${fmtYuan(totalCny)} ≈ $${fmtYuan(totalCny / usdRate)}` +
+  out.push(`  合计: ${tokens.toLocaleString('en-US')} tokens · ¥${fmtYuan(totalCny)} ≈ $${fmtYuan(totalCny / usdRate)} ≈ HK$${fmtYuan(totalCny / hkdRate)}` +
     `  (高峰 ¥${fmtYuan(peakCny)} · 空闲 ¥${fmtYuan(offCny)})`)
   if (hit != null) out.push(`  缓存命中率: ${hit}%`)
   if (!fold.model) out.push('  ⚠ 会话无计费请求(无 assistant/message usage 记录)')
@@ -175,13 +179,13 @@ function sessionCostPricingHas(model) {
 // Pure helpers exported for standalone verification (ignored by the loader).
 export { foldSession, isPeak, priceOf, DEFAULT_PRICING, DEFAULT_PEAK_HOURS }
 
-function formatOverview(rows, usdRate) {
+function formatOverview(rows, usdRate, hkdRate) {
   const out = []
   out.push(`会话费用总览（最近 ${rows.length} 个会话，按更新时间排序）`)
-  out.push('  ' + '模型'.padEnd(18) + 'tokens'.padStart(10) + '  费用(¥)'.padStart(9) + '  ≈$'.padStart(8) + '  标题')
+  out.push('  ' + '模型'.padEnd(18) + 'tokens'.padStart(10) + '  费用(¥)'.padStart(9) + '  ≈$'.padStart(8) + '  ≈HK$'.padStart(9) + '  标题')
   for (const r of rows) {
     const title = (r.title || '').slice(0, 24)
-    out.push(`  ${String(r.model || '—').padEnd(18)} ${fmtInt(r.tokens).padStart(10)} ${fmtYuan(r.cny).padStart(8)} ${fmtYuan(r.cny / usdRate).padStart(7)}  ${title}`)
+    out.push(`  ${String(r.model || '—').padEnd(18)} ${fmtInt(r.tokens).padStart(10)} ${fmtYuan(r.cny).padStart(8)} ${fmtYuan(r.cny / usdRate).padStart(7)} ${fmtYuan(r.cny / hkdRate).padStart(8)}  ${title}`)
   }
   out.push('')
   out.push('价格表: DeepSeek 官方 ' + PRICING_SOURCE + '；带 sessionId 调用可看单个会话的峰/谷明细。')
@@ -217,6 +221,7 @@ function collectedText(o) {
 export function apply(ctx, config = {}) {
   const dshApi = config.dshApi || DEFAULT_DSH_API
   const usdRate = config.usdRate || DEFAULT_USD_RATE
+  const hkdRate = config.hkdRate || DEFAULT_HKD_RATE
   const peakHours = config.peakHours || DEFAULT_PEAK_HOURS
   const pricing = { ...DEFAULT_PRICING, ...(config.pricing || {}) }
   _pricingKeys = Object.keys(pricing)
@@ -225,7 +230,7 @@ export function apply(ctx, config = {}) {
 
   ctx.tools.register({
     name: 'session_cost',
-    description: 'Per-session DeepSeek API cost. Without sessionId: overview table of the most recent sessions (tokens + cost). With sessionId: exact breakdown by billing bucket (uncached input / cache read / output) split by peak vs off-peak hours, priced with DeepSeek official peak/off-peak schema (CNY and USD).',
+    description: 'Per-session DeepSeek API cost. Without sessionId: overview table of the most recent sessions (tokens + cost). With sessionId: exact breakdown by billing bucket (uncached input / cache read / output) split by peak vs off-peak hours, priced with DeepSeek official peak/off-peak schema (CNY, USD and HKD).',
     parameters: {
       type: 'object',
       properties: {
@@ -244,7 +249,7 @@ export function apply(ctx, config = {}) {
           const events = (value && value.events) || []
           const fold = foldSession(events, pricing, peakHours)
           const session = { sessionId, projections: { values: {} } }
-          return formatSession(session, fold, usdRate)
+          return formatSession(session, fold, usdRate, hkdRate)
         }
         // Overview: most recent sessions, exact per-session fold from each log.
         const list = await apiCall(sh, dshApi, 'session.list', {})
@@ -268,7 +273,7 @@ export function apply(ctx, config = {}) {
             rows.push({ model: '(error)', tokens: 0, cny: 0, title: String(e.message).slice(0, 24) })
           }
         }
-        return formatOverview(rows, usdRate)
+        return formatOverview(rows, usdRate, hkdRate)
       } catch (e) {
         return 'session_cost error: ' + e.message
       }

@@ -14,6 +14,8 @@
 #                     else the standard loopback http://127.0.0.1:3080)
 #   --usd-rate <n>    CNY per 1 USD written into the config row (default none;
 #                     plugin falls back to its own 7.1 => omit to keep plugin default)
+#   --hkd-rate <n>    CNY per 1 HKD written into the config row (default none;
+#                     plugin falls back to its own 0.91 => omit to keep plugin default)
 #   --peak-hours      JSON [[start,end),…] peak hours (default none -> plugin default)
 #   --pricing         JSON object of model prices (default none -> plugin default)
 #   --dry-run         print what would change without writing anything
@@ -50,6 +52,7 @@ DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PROFILE_ID=""
 DSH_API=""
 USD_RATE=""
+HKD_RATE=""
 PEAK_HOURS=""
 PRICING=""
 DRY_RUN=0
@@ -59,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --profile) PROFILE_ID="$2"; shift 2 ;;
     --dsh-api) DSH_API="$2"; shift 2 ;;
     --usd-rate) USD_RATE="$2"; shift 2 ;;
+    --hkd-rate) HKD_RATE="$2"; shift 2 ;;
     --peak-hours) PEAK_HOURS="$2"; shift 2 ;;
     --pricing) PRICING="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -141,6 +145,9 @@ else
   if [[ -n "$USD_RATE" ]]; then
     ROW+=$'\n'"        usdRate: $USD_RATE"
   fi
+  if [[ -n "$HKD_RATE" ]]; then
+    ROW+=$'\n'"        hkdRate: $HKD_RATE"
+  fi
   if [[ -n "$PEAK_HOURS" ]]; then
     ROW+=$'\n'"        peakHours: $PEAK_HOURS"
   fi
@@ -164,5 +171,5 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 else
   echo "✔ installed into $PROFILE_DIR"
   echo "→ restart DSH; then call session_cost (no args = overview, or with sessionId for details)"
-  echo "  config written: dshApi=$DSH_API (override with --dsh-api); see README.md for --usd-rate/--peak-hours/--pricing"
+  echo "  config written: dshApi=$DSH_API (override with --dsh-api); see README.md for --usd-rate/--hkd-rate/--peak-hours/--pricing"
 fi

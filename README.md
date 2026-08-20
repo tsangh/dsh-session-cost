@@ -15,7 +15,8 @@
 | `deepseek-v4-flash` | ¥3.00 / ¥1.50 | ¥0.10 / ¥0.05 | ¥9.00 / ¥4.50 |
 | `deepseek-v4-pro` | ¥9.00 / ¥4.50 | ¥0.30 / ¥0.15 | ¥27.00 / ¥13.50 |
 
-USD 按可配置汇率折算（默认 7.1 CNY/USD）；DeepSeek 按人民币结算，权威金额以
+USD 按可配置汇率折算（默认 7.1 CNY/USD），HKD 按可配置汇率折算（默认 0.91 CNY/HKD，
+基于 HKD 兑 USD 约 7.75–7.85 的钉住区间推导）。DeepSeek 按人民币结算，权威金额以
 [DeepSeek 开放平台](https://platform.deepseek.com) 的用量账单为准。
 
 ## 安装（可移植，任意路径/服务器）
@@ -72,9 +73,9 @@ install-dsh-session-cost --profile web
 
 ## 使用
 
-- `session_cost`（不带参数）→ 最近 N 个会话的费用总览（tokens + ¥ + $）。
+- `session_cost`（不带参数）→ 最近 N 个会话的费用总览（tokens + ¥ + $ + HK$）。
 - `session_cost { "sessionId": "session-xxx" }` → 单会话明细：按计费桶
-  （输入未命中 / 输入命中 / 输出）× 峰/谷拆分。
+  （输入未命中 / 输入命中 / 输出）× 峰/谷拆分，合计同时显示 ¥ / $ / HK$。
 
 ## 配置
 
@@ -82,6 +83,7 @@ install-dsh-session-cost --profile web
 |---|---|---|
 | `dshApi` | DSH 后端地址（install.sh 自动探测，或 `--dsh-api` 覆盖） | `http://127.0.0.1:3080` |
 | `usdRate` | 人民币兑美元汇率（CNY/USD） | `7.1` |
+| `hkdRate` | 人民币兑港币汇率（CNY/HKD） | `0.91` |
 | `peakHours` | 北京时间高峰时段 `[[起, 止), …]` | `[[9,12],[14,18]]` |
 | `pricing` | 追加/覆盖模型价格（与内置表同构） | `{}` |
 | `overviewLimit` | 总览最多会话数 | `8` |
